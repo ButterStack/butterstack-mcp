@@ -1,0 +1,41 @@
+{
+  "name": "butterstack-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for ButterStack: game dev pipelines, tasks, builds, and asset approvals for AI assistants.",
+  "main": "index.js",
+  "bin": {
+    "butterstack-mcp": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "butterstack",
+    "gamedev",
+    "ci-cd",
+    "perforce",
+    "unreal-engine",
+    "unity"
+  ],
+  "author": "ButterStack Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ButterStack/butterstack-mcp.git"
+  },
+  "homepage": "https://www.butterstack.com",
+  "bugs": {
+    "url": "https://github.com/ButterStack/butterstack-mcp/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "_engineFloorNote": "engines.node is a supported-versions POLICY floor (matches CI, which only runs Node 24), not the real syntax floor. Every builtin this package uses is verified compatible back to Node 10.9.0. Do not lower engines.node below 18 just because the syntax would technically run on something older."
+}
