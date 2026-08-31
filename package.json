@@ -35,7 +35,7 @@
     "url": "https://github.com/ButterStack/butterstack-mcp/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=24.18.1"
   },
   "_engineFloorNote": "engines.node is a supported-versions POLICY floor (matches CI, which only runs Node 24), not the real syntax floor. Every builtin this package uses is verified compatible back to Node 10.9.0. Do not lower engines.node below 18 just because the syntax would technically run on something older."
 }
