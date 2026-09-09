@@ -104,6 +104,16 @@ Every tool takes a `project_id` (except `projects_list`), which accepts either a
 
 Node 18 or later. That's a supported-versions policy, not a hard technical floor: the server only uses builtins compatible back to Node 10.9.0, but 18 is the oldest version this package is actually tested against.
 
+## Releases
+
+Publishing is tag-driven, not merge-driven: merging to `main` publishes nothing. To cut a release, bump `version` in `package.json`, commit that, then tag the commit `vX.Y.Z` to match and push the tag. The tag push runs the test suite, publishes to npm with provenance, and cuts the matching GitHub Release with generated notes.
+
+```
+git commit -am "Bump version to 0.2.0"
+git tag v0.2.0
+git push origin main --tags
+```
+
 ## License
 
 MIT
