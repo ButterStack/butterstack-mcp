@@ -228,7 +228,7 @@ const TOOLS = [
       type: "object",
       properties: {
         project_id: { type: "string", description: "Project ID or name" },
-        build_id: { type: "number", description: "Build run ID" }
+        build_id: { type: "string", description: "Build run ID (UUID, as returned by builds_list)" }
       },
       required: ["project_id", "build_id"]
     }
@@ -240,7 +240,7 @@ const TOOLS = [
       type: "object",
       properties: {
         project_id: { type: "string", description: "Project ID or name" },
-        build_id: { type: "number", description: "Failed build run ID" }
+        build_id: { type: "string", description: "Failed build run ID (UUID, as returned by builds_list)" }
       },
       required: ["project_id", "build_id"]
     }
