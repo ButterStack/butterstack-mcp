@@ -80,12 +80,16 @@ The server refuses to send a stored credential to a host other than the one it w
 | `builds_list` | List recent CI/CD engine build runs and cook statuses. |
 | `builds_get` | Get step timings, exit codes, and commit metadata for a build run. |
 | `builds_investigate_failure` | Trigger or fetch AI failure investigation for a failed build, with root cause and blame attribution. |
+| `changes_list` | List a project's changes (git commits, Perforce and Lore changelists), filterable by source, identifier, and update time. |
+| `changes_get` | Get one change with its files, approvals, linked builds, and tasks. Takes a change id or a commit reference (full SHA, a Perforce build's `p4-<n>`, or `lore-<n>`), so a build's `commit_hash` from `builds_get` resolves to its change. |
 | `assets_list_pending` | List game assets awaiting producer or art lead approval. |
 | `assets_get_details` | Inspect an asset's polygon count, texture resolution, preview links, and approval history. |
 | `assets_approve` | Approve a submitted game asset version. |
 | `assets_deny` | Deny a submitted game asset version with constructive feedback. |
 
 Every tool takes a `project_id` (except `projects_list`), which accepts either a numeric project ID or a project name.
+
+The `changes_*` tools need the `read:changes` scope. A token issued before that scope was added to the CLI login set does not carry it and gets `insufficient_scope`: run `butter auth login` again, or add the scope to your token in account settings.
 
 ## Prompts
 
