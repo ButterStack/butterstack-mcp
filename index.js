@@ -246,6 +246,37 @@ const TOOLS = [
     }
   },
   {
+    name: "changes_list",
+    description:
+      "List a project's changes (git commits, Perforce and Lore changelists), newest first. To find the change a build came from, pass the build's commit_hash (from builds_get) as identifier; a Perforce build's 'p4-<n>' is accepted. Orphaned (ghost) commits are excluded unless orphaned is true. Needs the read:changes scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "Project ID or name" },
+        source: { type: "string", enum: ["lore", "git", "perforce"], description: "Only changes from this source" },
+        identifier: { type: "string", description: "Exact commit SHA, changelist number, 'p4-<n>', or 'lore-<n>'" },
+        updated_since: { type: "string", description: "ISO8601 date or timestamp, e.g. 2026-09-01" },
+        orphaned: { type: "boolean", description: "Include orphaned (ghost) commits" },
+        limit: { type: "number", default: 20, description: "Page size, 1-50" },
+        cursor: { type: "string", description: "pagination.next_cursor from a previous call" }
+      },
+      required: ["project_id"]
+    }
+  },
+  {
+    name: "changes_get",
+    description:
+      "Get one change with its files, approval counts, linked build runs, latest build, and task ids. change_id is either the numeric id from changes_list or a commit reference (full git SHA, a Perforce build's 'p4-<n>', or 'lore-<n>'), so a build's commit_hash from builds_get resolves straight to its change. Needs the read:changes scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", description: "Project ID or name" },
+        change_id: { type: "string", description: "Change id (all digits) or commit reference" }
+      },
+      required: ["project_id", "change_id"]
+    }
+  },
+  {
     name: "assets_list_pending",
     description: "List game assets (textures, meshes, audio, shaders) awaiting producer or art lead approval.",
     inputSchema: {
@@ -328,6 +359,36 @@ const PROMPTS = [
   }
 ];
 
+// Lore and Perforce share source_type "Changelist"; Lore identifiers are
+// namespaced "lore-<n>", Perforce ones are bare numbers.
+const CHANGE_SOURCES = {
+  git: { sourceType: "GitCommit" },
+  perforce: { sourceType: "Changelist", keep: (c) => c.source_type === "Changelist" && !String(c.identifier).startsWith("lore-") },
+  lore: { sourceType: "Changelist", keep: (c) => c.source_type === "Changelist" && String(c.identifier).startsWith("lore-") }
+};
+
+// A Perforce BuildRun's commit_hash is "p4-<n>" but its Change stores "<n>".
+// The identifier filter is exact and unvalidated, so the prefix has to be
+// stripped here or the lookup silently returns nothing.
+function changeLookupFor(ref) {
+  const m = /^p4-(\d+)$/.exec(ref);
+  if (m) return { identifier: m[1], sourceType: "Changelist" };
+  return { identifier: ref, sourceType: null };
+}
+
+async function changesRequest(endpoint) {
+  try {
+    return await apiRequest("GET", endpoint);
+  } catch (err) {
+    if (err.statusCode === 403 && err.response && err.response.required_scope === "read:changes") {
+      throw new Error(
+        "insufficient_scope: this token does not carry read:changes. Tokens issued before the changes tools shipped never got it; run `butter auth login` again to reissue."
+      );
+    }
+    throw err;
+  }
+}
+
 async function handleToolCall(name, args) {
   switch (name) {
     case "projects_list": {
@@ -373,6 +434,44 @@ async function handleToolCall(name, args) {
     case "builds_investigate_failure": {
       const res = await apiRequest("POST", `/api/v1/projects/${args.project_id}/build_runs/${args.build_id}/investigate`);
       return res;
+    }
+    case "changes_list": {
+      const query = new URLSearchParams();
+      let keep = null;
+      if (args.source) {
+        const source = CHANGE_SOURCES[args.source];
+        if (!source) throw new Error(`Unknown source "${args.source}". Use lore, git, or perforce.`);
+        query.set("source_type", source.sourceType);
+        keep = source.keep || null;
+      }
+      if (args.identifier) {
+        const lookup = changeLookupFor(String(args.identifier));
+        query.set("identifier", lookup.identifier);
+        if (lookup.sourceType && !args.source) query.set("source_type", lookup.sourceType);
+      }
+      if (args.updated_since) query.set("updated_since", args.updated_since);
+      if (args.orphaned) query.set("orphaned", "true");
+      if (args.limit) query.set("limit", args.limit.toString());
+      if (args.cursor) query.set("cursor", args.cursor);
+      const res = await changesRequest(`/api/v1/projects/${args.project_id}/changes?${query.toString()}`);
+      return keep ? { ...res, changes: res.changes.filter(keep) } : res;
+    }
+    case "changes_get": {
+      const ref = String(args.change_id);
+      let changeId = ref;
+      if (!/^\d+$/.test(ref)) {
+        const lookup = changeLookupFor(ref);
+        const query = new URLSearchParams({ identifier: lookup.identifier, orphaned: "true" });
+        if (lookup.sourceType) query.set("source_type", lookup.sourceType);
+        const found = await changesRequest(`/api/v1/projects/${args.project_id}/changes?${query.toString()}`);
+        if (!found.changes || found.changes.length === 0) {
+          throw new Error(
+            `No change with identifier "${lookup.identifier}" in project ${args.project_id}. The match is exact: use the full commit SHA, 'p4-<n>', or 'lore-<n>'. A bare Perforce changelist number is read as a change id; use changes_list with identifier instead.`
+          );
+        }
+        changeId = found.changes[0].id;
+      }
+      return changesRequest(`/api/v1/projects/${args.project_id}/changes/${changeId}`);
     }
     case "assets_list_pending": {
       const query = new URLSearchParams({ pending_approval: "true" });

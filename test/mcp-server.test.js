@@ -127,11 +127,11 @@ test("initialize handshake reports the unscoped package name", async () => {
   }
 });
 
-test("tools/list enumerates all twelve tools", async () => {
+test("tools/list enumerates all fourteen tools", async () => {
   const home = mkHome();
   try {
     const response = await runMcpRequest(home, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
-    assert.equal(response.result.tools.length, 12);
+    assert.equal(response.result.tools.length, 14);
     const names = response.result.tools.map((t) => t.name);
     assert.deepEqual(
       names,
@@ -144,6 +144,8 @@ test("tools/list enumerates all twelve tools", async () => {
         "builds_list",
         "builds_get",
         "builds_investigate_failure",
+        "changes_list",
+        "changes_get",
         "assets_list_pending",
         "assets_get_details",
         "assets_approve",
@@ -188,4 +190,129 @@ test("refuses to send a stored credential to a host different from the one it wa
     await stopCaptureServer(server);
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+// -- changes_list / changes_get ---------------------------------------------
+//
+// The changes API had no MCP tool. These drive the real server over stdio
+// against a routed HTTP listener, and assert on the requests it sent as well
+// as what it returned.
+
+const http = require("node:http");
+
+function startApiServer(routes) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    requests.push({ method: req.method, url: req.url });
+    const route = routes[`${req.method} ${req.url.split("?")[0]}`];
+    const status = route ? route.status || 200 : 404;
+    const body = JSON.stringify(route ? route.body : { error: "not_found" });
+    res.writeHead(status, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+    res.end(body);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, requests }));
+  });
+}
+
+async function callTool(routes, name, args) {
+  const { server, port, requests } = await startApiServer(routes);
+  const home = mkHome();
+  try {
+    writeCredentials(home, { host: `http://127.0.0.1:${port}` });
+    const response = await runMcpRequest(home, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: args }
+    });
+    return { result: response.result, requests };
+  } finally {
+    await stopCaptureServer(server);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+const CHANGES = [
+  { id: 456, identifier: "207", source_type: "Changelist" },
+  { id: 457, identifier: "lore-12", source_type: "Changelist" }
+];
+const CHANGE_DETAIL = { id: 456, identifier: "207", source_type: "Changelist", build_runs: [{ id: "b-1", commit_hash: "p4-207" }] };
+
+test("changes_list returns a project's changes and maps its arguments onto the API", async () => {
+  const { result, requests } = await callTool(
+    { "GET /api/v1/projects/108/changes": { body: { changes: CHANGES, pagination: { has_more: false } } } },
+    "changes_list",
+    { project_id: "108", updated_since: "2026-09-01", limit: 5, orphaned: true, cursor: "abc" }
+  );
+  assert.notEqual(result.isError, true, result.content[0].text);
+  assert.deepEqual(JSON.parse(result.content[0].text).changes, CHANGES);
+  const params = new URL(requests[0].url, "http://x").searchParams;
+  assert.equal(params.get("updated_since"), "2026-09-01");
+  assert.equal(params.get("limit"), "5");
+  assert.equal(params.get("orphaned"), "true");
+  assert.equal(params.get("cursor"), "abc");
+});
+
+test("changes_list source=lore keeps only Lore changelists", async () => {
+  const { result, requests } = await callTool(
+    { "GET /api/v1/projects/108/changes": { body: { changes: CHANGES, pagination: { has_more: false } } } },
+    "changes_list",
+    { project_id: "108", source: "lore" }
+  );
+  assert.deepEqual(JSON.parse(result.content[0].text).changes.map((c) => c.id), [457]);
+  assert.equal(new URL(requests[0].url, "http://x").searchParams.get("source_type"), "Changelist");
+});
+
+test("changes_get with a numeric id fetches that change directly", async () => {
+  const { result, requests } = await callTool(
+    { "GET /api/v1/projects/108/changes/456": { body: CHANGE_DETAIL } },
+    "changes_get",
+    { project_id: "108", change_id: "456" }
+  );
+  assert.deepEqual(JSON.parse(result.content[0].text), CHANGE_DETAIL);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "/api/v1/projects/108/changes/456");
+});
+
+test("changes_get resolves a Perforce build's p4-<n> commit to its change", async () => {
+  const { result, requests } = await callTool(
+    {
+      "GET /api/v1/projects/108/changes": { body: { changes: [CHANGES[0]], pagination: { has_more: false } } },
+      "GET /api/v1/projects/108/changes/456": { body: CHANGE_DETAIL }
+    },
+    "changes_get",
+    { project_id: "108", change_id: "p4-207" }
+  );
+  assert.deepEqual(JSON.parse(result.content[0].text), CHANGE_DETAIL);
+  const params = new URL(requests[0].url, "http://x").searchParams;
+  assert.equal(params.get("identifier"), "207", "the change stores the bare number, not p4-207");
+  assert.equal(params.get("source_type"), "Changelist");
+  assert.equal(requests[1].url, "/api/v1/projects/108/changes/456");
+});
+
+test("changes_get with an unknown commit is an error, not an empty result", async () => {
+  const { result } = await callTool(
+    { "GET /api/v1/projects/108/changes": { body: { changes: [], pagination: { has_more: false } } } },
+    "changes_get",
+    { project_id: "108", change_id: "deadbeef" }
+  );
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /No change with identifier "deadbeef"/);
+});
+
+test("a token without read:changes is told to log in again", async () => {
+  const { result } = await callTool(
+    {
+      "GET /api/v1/projects/108/changes": {
+        status: 403,
+        body: { error: "insufficient_scope", required_scope: "read:changes", token_scopes: ["read:builds"] }
+      }
+    },
+    "changes_list",
+    { project_id: "108" }
+  );
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /read:changes/);
+  assert.match(result.content[0].text, /butter auth login/);
 });
